@@ -38,13 +38,13 @@ Suggested project structure:
 <ProjectName>/
   source references (not copied unless explicitly requested)
   output/
-    <name>_MODIFIED.dxf
+    <name>_GEOREFERENCED.dxf
     <name>_QA.pdf
     <name>_COMPARE.pdf       # only if operator explicitly saves it
     <name>.vpgc
 ```
 
-`_MODIFIED` is a working requirement for generated geometry derived from an existing source; final naming/localization will be decided before release. Source files are never overwritten.
+`_GEOREFERENCED` is the mandatory suffix for the final georeferenced DXF. It is intentionally explicit rather than abbreviated. Source files are never overwritten.
 
 Visual comparison is temporary by default. If the operator chooses to save it, `_COMPARE` is a mandatory suffix and the PDF contains no georeferencing/GeoPDF data.
 
@@ -63,3 +63,31 @@ PDF/page orientation must not redefine surveying axes. Support AUTO orientation 
 ## QA independence
 
 CONTROL observations used to calculate a transformation are not independent proof of accuracy. Independent CHECK observations/geometry must be reported separately whenever available.
+
+
+## Core file-format scope
+
+Keep the core deliberately small. VP GeoConvert is an open-source, non-commercial conversion/georeferencing tool, not a general-purpose CAD package.
+
+### Primary input and output
+
+- Vector PDF is the primary conversion input.
+- DXF is the primary georeferenced geometry output: `<name>_GEOREFERENCED.dxf`.
+
+### Reference inputs for the core
+
+The initial core should support, subject to implementation and test coverage:
+
+- DXF — 2D reference geometry and layers.
+- LandXML / XML — planar alignment/reference geometry and points; elevation values are ignored by the georeferencing model.
+- PLF / GT — planar engineering/survey reference geometry where the format can be implemented reliably.
+- CSV / TXT and similar point lists — explicit point IDs and X/Y coordinates.
+- Manual X/Y entry — control/check coordinates without a reference file.
+
+Every imported reference observation retains its source/provenance and role (for example CONTROL or CHECK). Different reference sources are not silently merged into one undifferentiated dataset.
+
+### Formats outside the initial core
+
+DWG, raster-plan workflows, GeoTIFF and other specialist/national/vendor formats are not required for the initial core. Do not add heavy dependencies merely to increase the format count.
+
+The internal 2D geometry model and importer/exporter boundaries should be designed so additional converters can later be implemented as optional modules/plugins. A plugin framework itself is **not** an MVP requirement; only preserve a clean extension boundary now.
