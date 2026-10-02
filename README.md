@@ -25,3 +25,16 @@ Visual comparison exports use the mandatory filename suffix `_COMPARE.pdf` and a
 The project is intended to be released under the MIT License. A separate engineering/surveying disclaimer and third-party notices will be maintained. Dependency licensing will be audited before any distributable build is published.
 
 No distributable build should be treated as approved until the dependency and license audit is complete.
+
+
+## Coordinate orientation
+
+VP GeoConvert must not assume that PDF page axes correspond to surveying axes. Drawings may be rotated, axis-swapped, or mirrored.
+
+- The surveying convention is always **X = Northing, Y = Easting**.
+- `AUTO` should determine PDF-to-survey axis orientation from available control information.
+- Manual corrections must include `SWAP X <-> Y`, `FLIP X`, `FLIP Y`, and `RESET`.
+- Ordinary page rotation (including 90/180/270 degrees) should be handled by the georeferencing transformation rather than silently redefining surveying axes.
+- Possible reflection/mirroring must be explicitly detected and reported.
+- Any orientation change must trigger a complete georeferencing and QA recalculation.
+- Automatic orientation must remain visible to the operator; ambiguous orientation must produce a warning rather than a silent assumption.
