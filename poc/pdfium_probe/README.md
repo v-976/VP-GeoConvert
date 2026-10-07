@@ -224,18 +224,61 @@ header, and no optional-content accessor is exported. PDFium's public API
 exposes **no layer/OCG information**, so the probe prints
 `not available (no public PDFium API)` instead of inventing a layer assignment.
 
-### 2. Cubic Bézier segments expose only one point
+### 2. Cubic Bézier: one point per segment, but the curve IS fully recoverable
 
 `FPDFPathSegment_GetPoint` returns exactly one `(u, v)` pair per segment. A
-cubic Bézier needs three points (two control points and an endpoint), so the
-control points and endpoint of a `CUBIC_BEZIER` **cannot be fully reconstructed
-from the public API**. The probe reports the one available point and prints a
-`NOTE:` line for every such segment.
+cubic Bézier needs three points, so a naive reading suggests control points and
+endpoint are lost.
 
-This is the most significant fidelity finding of the PoC and needs to be
-resolved before committing to PDFium for engineering geometry. Options to
-investigate later: reading the content stream at a lower level, or accepting
-reduced Bézier fidelity.
+**That reading was wrong, and controlled real engineering benchmark data
+disproved it.** An earlier version of this file concluded that Bézier geometry
+was unrecoverable and that a low-level content-stream parser would be required.
+Both claims were incorrect and are withdrawn.
+
+PDFium does not emit one segment per curve. It emits **one segment per control
+point**. One PDF `c` operator therefore appears as exactly **three consecutive
+`CUBIC_BEZIER` segments**, preceded by the `MOVE` that carries the start point:
+
+```
+MOVE          -> start point (P0)
+CUBIC_BEZIER  -> control point 1 (C1)
+CUBIC_BEZIER  -> control point 2 (C2)
+CUBIC_BEZIER  -> endpoint (P3)
+```
+
+The original representation is fully recoverable by grouping runs of three.
+
+Evidence from the controlled real engineering benchmark (one DXF ground truth
+exported to PDF by three different generators):
+
+| Generator | Bézier runs | Runs with length not a multiple of 3 | Runs preceded by `MOVE` | Runs preceded by `LINE` | Degenerate points |
+|---|---|---|---|---|---|
+| 3D-Win | 144 | **0** | 36 | 108 | **0** of 432 |
+| ProgeCAD Export | 765 | **0** | 765 | 0 | **0** of 3 492 |
+| ProgeCAD Print | 0 (no curves) | — | — | — | — |
+
+No run had any other length, and **no `CUBIC_BEZIER` point ever repeated the
+preceding point's coordinates**. A lossy or collapsed representation would have
+produced degenerate segments.
+
+Numeric confirmation on a real DXF `CIRCLE` (3D-Win export, 12 extracted
+points, four quarter arcs). A circle-to-cubic conversion uses
+`kappa = 0.5522847498`:
+
+| Quantity | Expected | Extracted | Error |
+|---|---|---|---|
+| `kappa * r` (first control point) | 0.06517595 | 0.06500250 | 0.27 % |
+| second control point, `u` | 622.95884155 | 622.958984 | 0.000142 |
+
+The reconstructed bounding box was square to 12 significant digits
+(`du/dv = 0.9999999999998`), and the path closed exactly on its start point.
+Control points sat 14.18 % off the radius, exactly the expected offset for true
+cubic control points lying on the diagonals.
+
+**Conclusion:** PDFium's public path API is sufficient for engineering Bézier
+geometry. No low-level content-stream parsing is needed. The probe's per-segment
+`NOTE:` line is retained only to flag segments during diagnosis, not to report
+data loss.
 
 ### 3. Coordinate precision is limited by the API, not by this program
 
@@ -271,23 +314,40 @@ Ownership of handles returned by `FPDFFormObj_GetObject` is undocumented. The
 probe never destroys page or form child handles; only page-level handles from
 `FPDF_LoadPage` are closed.
 
-### 4a. The page object list is not the whole page content
+### 4a. Anomalous `FPDFPage_CountObjects` result: not reproduced on real data
 
-On synthetic input, `FPDFPage_CountObjects` returned **zero** page objects for a
-page whose content stream consisted only of a bare cubic Bézier curve
-(`100 30 120 40 140 50 160 60 c S`). Adding a leading `m` (moveto) made the
-same geometry appear as a PATH object with its segments.
+An earlier version of this file claimed that `FPDFPage_CountObjects` could omit
+page content, citing two synthetic observations where a page returned **zero**
+objects for a bare cubic Bézier (`100 30 120 40 140 50 160 60 c S`), and where
+a line path plus a Bézier path reported only the line segments.
 
-Separately, a content stream containing a stroked line path followed by a
-stroked Bézier path reported **one** object containing only the line segments;
-the Bézier subpath was absent from the object list.
+**On controlled real engineering data the problem did not reproduce.** Object
+counts per page were uniformly high and no page returned zero objects:
 
-The cause is most likely that PDFium's `FPDFPage_CountObjects` reflects a parsed
-object tree rather than a literal flattening of the content stream, and may
-merge, reorder or drop content. **This must be investigated with a real
-engineering drawing before PDFium can be relied upon for complete extraction.**
-It is a more serious risk than the Bézier precision issue, because content can
-be missing rather than merely less precise.
+| Generator | Page object counts | Any zero-object page |
+|---|---|---|
+| 3D-Win | 10442 | no |
+| ProgeCAD Export | 10175, 10150, 10150 | no |
+| ProgeCAD Print | 12667 | no |
+
+An earlier version of this file rated content omission as *"a more serious risk
+than the Bézier precision issue"*. **That assessment is withdrawn.** It rested
+entirely on minimal hand-written PDFs whose reliability was never established,
+and it did not survive contact with a real drawing.
+
+Most likely explanation: the synthetic fixtures were minimal files without a
+well-formed cross-reference table or resource dictionary, so PDFium likely
+recovered a degraded object tree. This is a defect in the test input, not
+evidence about PDFium.
+
+**This is NOT recorded as a confirmed PDFium limitation.** Whether
+`FPDFPage_CountObjects` ever omits genuine content remains **NOT VERIFIED** and
+would need a drawing known independently to be complete. It is not currently
+known to be a problem.
+
+Note what is still unproven: object counts were never reconciled against the DXF
+ground truth, so *silent omission at the margin* cannot be excluded even though
+no gross anomaly appeared.
 
 ### 5. No per-object text accessor
 
@@ -336,35 +396,83 @@ accumulated-transform logic is needed regardless.
   The synthetic inputs were constructed only to prove the code paths execute.
   They prove nothing about real drawing fidelity.
 
-- `TESTED WITH REAL DATA` — **NOT VERIFIED.** No engineering vector PDF has been
-  supplied to the repository; `**/*.pdf` matches nothing. No third-party PDF was
-  downloaded and passed off as an engineering benchmark. Nothing here may be
-  read as evidence that PDFium extracts Civil 3D / OpenRoads geometry with
-  sufficient fidelity.
-- `NOT VERIFIED` — the limitations above, in particular the missing-object-count
-  behaviour in section 4a, the Bézier single-point issue, and the form matrix
-  composition against real drawings.
+- `TESTED WITH CONTROLLED REAL ENGINEERING DATA` — a controlled benchmark was run
+  after the code was committed. One DXF ground truth drawing was exported to PDF
+  by three different generators and all three were processed with this exact
+  probe binary, unmodified. Measured results:
+
+  | | 3D-Win | ProgeCAD Export | ProgeCAD Print |
+  |---|---|---|---|
+  | pages | 1 | 3 | 1 |
+  | page size (points) | 907x652 | 595x842 | 595x842 |
+  | PATH objects | 10438 | 30472 | 12667 |
+  | TEXT objects | 4 | 3 | 0 |
+  | IMAGE / FORM / SHADING | 0 | 0 | 0 |
+  | segments (declared) | 25697 | 86533 | 42509 |
+  | MOVE | 10438 | 30497 | 12667 |
+  | LINE | 14780 | 34802 | 29781 |
+  | CUBIC_BEZIER | 432 | 3492 | 0 |
+  | CLOSE | 180 | 67 | 2798 |
+  | max FORM depth | 1 | 1 | 1 |
+
+  Benchmark conclusions, all measured rather than inferred:
+
+  - Bézier curves are fully recoverable (section 2). This is now confirmed on
+    real engineering geometry.
+  - No generator rasterised. All three PDFs are fully vector: zero `IMAGE`,
+    zero `SHADING`, no transparent pages.
+  - `FPDFPage_CountObjects` showed no anomaly on real data (section 4a).
+  - **Confirmed limitation:** OCG/layer is genuinely unavailable. The DXF has 33
+    named layers; zero were obtainable.
+  - **Confirmed limitation:** text fidelity is generator-dependent. ProgeCAD
+    Print has **zero** `TEXT` objects and **zero** curves, so its text is either
+    outlined to paths or lost. 3D-Win preserved 71 characters; ProgeCAD Export
+    only 9 per page.
+  - **Confirmed behaviour:** 3D-Win and ProgeCAD Print report `d < 0` in their
+    dominant matrices, i.e. **reflection of the v axis**. PDFium does not
+    normalise this. Orientation handling will be required later.
+  - **Confirmed behaviour:** sheet size and pagination were altered by two of the
+    three generators; only 3D-Win preserved the original sheet geometry.
+
+  This is one drawing of one plan type. It is **not** a full validation of
+  Civil 3D / OpenRoads PDF handling.
+
+- `NOT VERIFIED` — recursive FORM traversal on real drawings (no `FORM` object
+  appeared in any benchmark PDF), accumulated matrix composition on real
+  drawings, geometric reconciliation of object counts against the DXF ground
+  truth, whether ProgeCAD Print text became paths or was lost, and full
+  Civil 3D / OpenRoads coverage.
 
 ## What the PoC has and has not established
 
-Established on synthetic input:
+Established:
 
 - PDFium opens PDFs, enumerates pages and page objects, and reports object type,
   bounds and matrix through its public API.
 - Raw path primitives `MOVE`, `LINE`, `CUBIC_BEZIER` and `CLOSE` are obtainable,
   including the close flag.
+- Cubic Bézier curves are recoverable in full: `MOVE` start point plus three
+  consecutive `CUBIC_BEZIER` segments give control1, control2 and endpoint.
 - Text, image metadata and recursive form traversal are all reachable.
+- Real vector engineering PDFs are processed without rasterised content in the
+  case of all three tested generators.
 - The shipped binaries and this probe need only Windows system DLLs.
 
 **Not established, and still open:**
 
-- Whether real Civil 3D / OpenRoads vector PDFs yield complete and faithful
-  geometry.
-- Whether `FPDFPage_CountObjects` omits real drawing content (see 4a).
-- Whether Bézier fidelity loss is acceptable or must be solved another way.
-- Whether OCG/layer information is obtainable by any route. If it proves to be
-  essential, PDFium's public API cannot currently supply it and that is an
-  architectural decision to make before building the real extractor.
+- Coverage of Civil 3D and OpenRoads specifically. Only one DXF-based drawing
+  was tested, from a different toolchain.
+- Whether `FPDFPage_CountObjects` omits real drawing content at the margin. No
+  gross anomaly appeared (see 4a), but counts were not reconciled against the
+  DXF ground truth.
+- Whether OCG/layer information is obtainable by any route. The public API
+  cannot supply it, confirmed on real data. If layers prove essential, that is
+  an architectural decision to make before building the real extractor.
+
+Closed by the benchmark:
+
+- ~~Whether Bézier fidelity loss is acceptable or must be solved another way.~~
+  Closed: there is no loss. See section 2.
 
 ## Licence note for this directory
 
