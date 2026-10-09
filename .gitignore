@@ -1,3 +1,6 @@
 # Benchmark data is local test material and must never enter the repository.
 # Source drawings and DXF may contain project-specific or confidential detail.
-benchmark/
+/benchmark/
+
+# Research harness generated results (regenerate with benchmark_runner.py).
+/research/results/
