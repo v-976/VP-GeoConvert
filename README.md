@@ -20,6 +20,21 @@ Open-source, local-first PDF-to-georeferenced-DXF converter for surveying and en
 
 Visual comparison exports use the mandatory filename suffix `_COMPARE.pdf` and are intentionally **not georeferenced**.
 
+## Coordinate domains and transformation routes
+
+The production geometry model keeps four strictly separate 2D domains:
+
+- PDF OBJECT: `p, q`;
+- PDF PAGE: `u, v`;
+- DXF CAD: `cad_x, cad_y`;
+- SURVEY: `X = Northing`, `Y = Easting`.
+
+PDF-to-DXF registration uses a PAGE-to-CAD 2D similarity/Helmert
+transformation. PAGE-to-SURVEY is allowed only from explicit user-provided
+correspondences. CAD-to-SURVEY is a separate optional transformation based only
+on explicit user-provided data. VP GeoConvert does not infer this relationship,
+a CRS, elevation, or an axis swap.
+
 ## Licensing and safety
 
 The project is intended to be released under the MIT License. A separate engineering/surveying disclaimer and third-party notices will be maintained. Dependency licensing will be audited before any distributable build is published.

@@ -11,6 +11,17 @@ VP GeoConvert is a **2D plan georeferencing and conversion tool**.
 - If elevation values exist only as PDF text/annotations, they remain ordinary text/geometry and are not interpreted as heights.
 - No artificial `Z=0` or other elevation is to be introduced as surveying data.
 
+The production model uses four explicit 2D coordinate domains:
+
+- PDF OBJECT: `p, q`;
+- PDF PAGE: `u, v`;
+- DXF CAD: `cad_x, cad_y`;
+- SURVEY: `X = Northing`, `Y = Easting`.
+
+These domains must not be mixed implicitly. In particular, CAD axes are not
+SURVEY axes unless a separate user-supported CAD-to-SURVEY transformation has
+been established.
+
 ## Coordinate systems: worldwide use
 
 VP GeoConvert must not be tied to Finland, GK25, N2000, EPSG:3879, or any other national/local coordinate system.
@@ -58,11 +69,23 @@ QA should record source filenames, SHA-256 hashes, VP GeoConvert version, proces
 
 ## Orientation
 
-PDF/page orientation must not redefine surveying axes. Support AUTO orientation plus explicit `SWAP X <-> Y`, `FLIP X`, `FLIP Y`, and `RESET`. Reflection/mirroring must be explicitly reported and accepted rather than silently hidden. Any orientation change triggers full georeferencing and QA recalculation.
+PDF/page orientation must not redefine CAD or surveying axes. Support AUTO
+orientation plus explicit `SWAP X <-> Y`, `FLIP X`, `FLIP Y`, and `RESET` when
+operating in SURVEY. Reflection/mirroring must be explicitly reported and
+accepted rather than silently hidden. No implicit X/Y swap is allowed. Any
+orientation change triggers full georeferencing and QA recalculation.
+
+For PDF-to-DXF registration, the primary transformation route is PAGE to CAD.
+PAGE to SURVEY is permitted only from explicit user-provided PAGE/SURVEY
+correspondences. CAD to SURVEY is a separate optional route requiring explicit
+user-provided CAD/SURVEY data; it is never inferred automatically.
 
 ## QA independence
 
 CONTROL observations used to calculate a transformation are not independent proof of accuracy. Independent CHECK observations/geometry must be reported separately whenever available.
+
+Residuals are computed only within one declared target domain. CONTROL and
+CHECK observations from different target domains are not combined.
 
 
 ## Core file-format scope

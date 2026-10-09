@@ -18,6 +18,15 @@ The core must not make PDF, DXF, LandXML, or a national coordinate system its in
 
 Coordinate domains are explicit and must never be mixed implicitly.
 
+### PDF OBJECT
+
+Raw coordinates inside a PDF object use **p, q**.
+
+- They are source-object coordinates used while preserving PDF path content
+  and applying object/form transforms.
+- They are not PAGE, CAD, or SURVEY coordinates.
+- Conversion to PAGE uses explicit PDF transformation metadata.
+
 ### PAGE
 
 Raw drawing/page coordinates use **u, v**.
@@ -26,6 +35,15 @@ Raw drawing/page coordinates use **u, v**.
 - They must never be presented as surveying X/Y.
 - Unit and page transformation metadata are stored separately.
 
+### CAD
+
+Native planar coordinates imported from a DXF reference use
+**cad_x, cad_y**.
+
+- CAD coordinates retain the source DXF's declared or unknown units.
+- `cad_x, cad_y` must not be presented as SURVEY `X, Y`.
+- No CAD-to-SURVEY relationship is assumed or inferred.
+
 ### SURVEY
 
 Georeferenced planar coordinates use:
@@ -33,7 +51,9 @@ Georeferenced planar coordinates use:
 - **X = Northing**
 - **Y = Easting**
 
-This convention applies throughout the UI, QA reports, control/check data, project files, logs, and public APIs of VP GeoConvert.
+This convention applies whenever the declared domain is SURVEY, including UI,
+QA reports, control/check data, project files, logs, and public APIs. It does
+not rename PAGE or CAD axes.
 
 ### Z / elevation
 
@@ -154,11 +174,14 @@ Residuals and statistics are reportable per source group.
 
 ## Correspondence
 
-A correspondence links PAGE-domain information to SURVEY-domain information.
+A correspondence links a source point to a point in one explicitly declared
+target domain. Correspondences with different target domains are never merged
+into one fit.
 
 Examples:
 
-- page point ↔ survey control point;
+- page point ↔ CAD reference point;
+- page point ↔ survey control point supplied explicitly by the user;
 - page grid intersection ↔ entered X/Y;
 - page line/curve feature ↔ reference alignment feature.
 
@@ -167,6 +190,18 @@ Automatic matching creates **proposals**, not silently accepted correspondences.
 ## Transformation
 
 The primary transformation is a 2D similarity/Helmert transformation.
+
+Approved transformation routes are:
+
+- PAGE to CAD for PDF-to-DXF registration;
+- PAGE to SURVEY when the user explicitly provides PAGE/SURVEY
+  correspondences;
+- CAD to SURVEY as a separate optional transformation when the user explicitly
+  provides CAD/SURVEY correspondences.
+
+CAD to SURVEY is never inferred from coordinate magnitudes, filenames, a
+PAGE-to-CAD fit, or CRS assumptions. Transformations for different routes are
+stored and evaluated separately.
 
 Stored transformation state includes:
 
@@ -177,6 +212,9 @@ Stored transformation state includes:
 - reflection state;
 - fitted CONTROL IDs;
 - residual statistics.
+
+The transformation records its source and target domains. Forward and inverse
+operations preserve that declared route and reject points from other domains.
 
 Affine transformation is diagnostic unless explicitly promoted by a future design decision.
 
@@ -202,6 +240,9 @@ Units belong to a coordinate domain/source, not to individual arbitrary entities
 
 The system must distinguish raw PDF/page units from real planar coordinate units.
 
+CAD and SURVEY units belong to their respective source/domain metadata. A unit
+label does not establish a CAD-to-SURVEY relationship.
+
 No CRS is inferred from coordinate magnitude.
 
 The output unit must be explicit. Initial surveying/engineering workflows are expected to commonly use metres, but the internal architecture must not hard-code Finland or a particular CRS.
@@ -209,6 +250,10 @@ The output unit must be explicit. Initial surveying/engineering workflows are ex
 ## QA data
 
 QA is derived from immutable source geometry plus explicit correspondence/transformation state.
+
+Residual components and radial residuals are computed only after both values
+are expressed in the same declared target domain. PAGE, CAD, and SURVEY values
+must never be subtracted directly from one another.
 
 Store/report at least:
 
